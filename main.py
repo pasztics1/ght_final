@@ -13,6 +13,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, butter, filtfilt, welch, iirnotch, lfilter
 import statistics
+from reportlab.pdfgen import canvas
+import textwrap
 
 
 
@@ -43,9 +45,6 @@ def apply_filters(signal, sampling_rate, lff=1.0, hff=15.0, notch_freq=50.0, not
     return filtered_signal
 
 
-
-
-
 def butter_bandpass(lowcut, highcut, fs, order=5):
     nyquist = 0.5 * fs
     low = lowcut / nyquist
@@ -58,8 +57,24 @@ def bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
-def detect_main_frequency(signal, sampling_rate, lowcut=None, highcut=None, plotting=False):
-    # Apply Filters
+
+def detect_main_frequency(signal, sampling_rate, lowcut=None, highcut=None, min_magnitude=0.03, plotting=False):
+    """
+    Detects the main frequency in a given signal, based on a minimum magnitude threshold.
+    
+    Parameters:
+    - signal: The input signal to analyze.
+    - sampling_rate: The sampling rate of the signal.
+    - lowcut: The low cutoff frequency for bandpass filtering (optional).
+    - highcut: The high cutoff frequency for bandpass filtering (optional).
+    - min_magnitude: Minimum magnitude value (in volts) to consider a frequency significant.
+    - plotting: Boolean to indicate whether to plot the FFT magnitude spectrum.
+    
+    Returns:
+    - main_freq: The detected main frequency, or None if no significant frequency is found.
+    """
+    
+    # Apply Filters if specified (assuming bandpass_filter is defined elsewhere)
     if lowcut and highcut:
         filtered_signal = bandpass_filter(signal, lowcut, highcut, sampling_rate)
     else:
@@ -69,50 +84,55 @@ def detect_main_frequency(signal, sampling_rate, lowcut=None, highcut=None, plot
     signal_fft = np.fft.fft(filtered_signal)
     freqs = np.fft.fftfreq(n, 1.0 / sampling_rate)
     
-    # Consider only the positive freqs
+    # Consider only the positive frequencies
     positive_freq_indices = np.where(freqs >= 0)
     positive_freqs = freqs[positive_freq_indices]
     fft_magnitudes = np.abs(signal_fft[positive_freq_indices])
 
-    # Identifing the Main Frequency
-    # Apply a threshold based on the maximum magnitude to filter out noise
-    threshold = np.max(fft_magnitudes) * 0.1  # Trs adjustable
-    peaks, _ = find_peaks(fft_magnitudes, height=threshold)
+    # Identifying the Main Frequency
+    # Apply a minimum magnitude threshold
+    significant_indices = np.where(fft_magnitudes >= min_magnitude)[0]
 
-    if len(peaks) == 0:
+    if len(significant_indices) == 0:
         main_freq = None  # No significant frequency found
     else:
-        main_freq_idx = np.argmax(fft_magnitudes[peaks])
-        main_freq = positive_freqs[peaks[main_freq_idx]]
+        # Find the peak with the maximum magnitude among significant indices
+        max_magnitude_index = np.argmax(fft_magnitudes[significant_indices])
+        main_freq = positive_freqs[significant_indices[max_magnitude_index]]
 
+    # Plotting (if requested)
     if plotting:
-        # Visualization
         plt.figure(figsize=(12, 8))
 
         plt.subplot(3, 1, 1)
-        plt.plot(np.linspace(0, len(signal)/sampling_rate, len(signal)), signal)
+        plt.plot(np.linspace(0, len(signal) / sampling_rate, len(signal)), signal)
         plt.title('Original Signal')
         plt.xlabel('Time (s)')
         plt.ylabel('Amplitude')
 
         plt.subplot(3, 1, 2)
-        plt.plot(np.linspace(0, len(filtered_signal)/sampling_rate, len(filtered_signal)), filtered_signal)
+        plt.plot(np.linspace(0, len(filtered_signal) / sampling_rate, len(filtered_signal)), filtered_signal)
         plt.title('Filtered Signal')
         plt.xlabel('Time (s)')
         plt.ylabel('Amplitude')
 
         plt.subplot(3, 1, 3)
         plt.plot(positive_freqs, fft_magnitudes)
-        if main_freq:
-            plt.plot(main_freq, fft_magnitudes[peaks[main_freq_idx]], 'rX')
+        if main_freq is not None:
+            plt.plot(main_freq, fft_magnitudes[np.where(positive_freqs == main_freq)][0], 'rX')
         plt.title('FFT Magnitude Spectrum')
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Magnitude')
+        plt.axhline(y=min_magnitude, color='r', linestyle='--', label=f'Min Magnitude ({min_magnitude})')
+        plt.legend()
 
         plt.tight_layout()
         plt.show()
 
     return main_freq
+
+
+
 
 
 
@@ -183,24 +203,44 @@ def analyser(original_signal, sampling_rate, plotting=False):
     
 
     
+
+
 def generate_pdf_report(file_name, result):
     report_file_name = f'{file_name}_report.pdf'
     c = canvas.Canvas(report_file_name)
     electrodes = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz', 'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
     
+    # Set initial Y position
+    y = 750
+    line_height = 20
+    bottom_margin = 50
+    max_line_width = 400  # Maximum width for the text
+    
+    # Set font size
+    c.setFont("Helvetica", 10)
+    
+    # Title
+    c.drawString(100, y, f'GHT testing results for {file_name}')
+    y -= line_height * 2
+    
     # Measured signals
-    c.drawString(100, 630, f'GHT testing results for {file_name}')
-    y = 610
-    i = 0
-    for i in range(len(result)):
-        c.drawString(100, y, f"{electrodes[i]} : Frequency(es): {result[i]}")
-        y -= 20
-        if y < 50:  # If near the bottom of the page
-            c.showPage()  # Create a new page
-            y = 750  
-        i+=1
-    print(report_file_name)
+    for i, freq in enumerate(result):
+        text = f"{electrodes[i]} : Frequency(es): {freq}"
+        
+        # Wrap text
+        wrapped_text = textwrap.wrap(text, width=int(max_line_width / 6))  # Adjust wrap width to fit page
+        
+        for line in wrapped_text:
+            c.drawString(100, y, line)
+            y -= line_height
+            
+            # Check if we need a new page
+            if y < bottom_margin:
+                c.showPage()
+                y = 750
+    
     c.save()
+    print(f"Report saved as: {report_file_name}")
     return report_file_name
 
     
@@ -218,6 +258,7 @@ class MyFirstPlugin(ReportPlugin):
         info = data.info
         column_names = data.ch_names[:19]
         sampling_rate = meta.sample_rate #/sec (250 or 500)
+        electrodes = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz', 'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
         print(f"Running on a {sampling_rate}hz sampling rate")
         
         #PARAMETERS#
@@ -225,7 +266,7 @@ class MyFirstPlugin(ReportPlugin):
         searched_frequency = 4 #hz
         margin = searched_frequency * 0.05
         median = True #ilyen formában nem fog működni a szignifikáns frekvencia, mert óaz mindig 50hz lesz a zaj miatt (maximum szűrővel, lehet úgy jobban is működik)
-        plotting = False #nem tudom van e rá szükség
+        plotting = True #nem tudom van e rá szükség
         #PARAMETERS#
 
         print(info)
@@ -235,35 +276,7 @@ class MyFirstPlugin(ReportPlugin):
         lenght = (sampling_rate*periods)
         total_sampling = meta.sample_count
         number_of_cycles = 1+total_sampling//lenght
-        
-        
-        #"signal" is a 2d list with 19 sublists, containing only the data we are interested in performing the fourier transformation on.
-        #the "data" list contains a 2d list, with len(column_names) list in it (19 channels optimally for the 19 electrodes)
-        #for an infinite time
-        for i in range(number_of_cycles-2):#test this!!! the -2 probably accounts for the indexing starting with 0, and the last period being handled outside of the loop. (and with -1 index error occures obviusly)
-            signal[i%len(column_names)].append(data[i%len(column_names)][i*lenght:(i+1)*(lenght)])
-        
-        #for just the first 19 signals
-        for i in range(min(19,(number_of_cycles-2))):#test this!!! the -2 probably accounts for the indexing starting with 0, and the last period being handled outside of the loop. (and with -1 index error occures obviusly)
-            signal[i].append(data[i][i*lenght:(i+1)*(lenght)])        
-        
-        
-        
-        # Calculate the last signal index
-        last_signal_index = (total_sampling // lenght) % len(column_names) - 1
-        # Extract the last segment of data
-        last_segment_start = (total_sampling // lenght) * lenght
-        last_segment = data[last_signal_index][last_segment_start:total_sampling]
-        # Calculate how much padding is needed
-        num_zeros = lenght - len(last_segment)
-        # Pad the last segment with zeros to match the desired length
-        padded_segment = np.pad(last_segment, (0, num_zeros), mode='constant')
-        # Append the padded segment to the correct signal
-        signal[last_signal_index].append(padded_segment)
-
             
-        
-        
         #test for shifts in reading the data
         """
         for i in range(19):
@@ -280,7 +293,7 @@ class MyFirstPlugin(ReportPlugin):
         
         
 
-        
+        '''
         if plotting:
             for i in range(5): #nyilván out of ranget ad, ha nem elég hosszú a felvétel, legalább x*periods másodperc hosszú kell legyen
                 x = np.linspace(0,100,len(signal[i][0]))
@@ -291,6 +304,7 @@ class MyFirstPlugin(ReportPlugin):
                 plt.xlabel("X-axis")
                 plt.grid(True)
                 plt.show()
+        '''
         
         #finding every frequency
         detected = []
@@ -306,30 +320,67 @@ class MyFirstPlugin(ReportPlugin):
         result = [[] for _ in range(len(column_names))]
         incorrect = [] #incorrect hold the frequencies that were picked up wrongfully. It contains 19 sub arrays that contains 2 element lists of the errors, with their index (human readable), and the detected frequency
         incorrect = [[] for _ in range(len(column_names))]
+        
+        
         for i in range(len(column_names)):
             correct = True
+            other_signal = False
             for j in range(len(detected[i])): #this is a fix number, this should not fluctuate, and will not since it's lenght is number_of_cycles-1    
                 if j%len(column_names) == i:
-                    x = np.linspace(0,100,len(data[i][j*lenght:(j+1)*lenght]))
-                    plt.plot(x, apply_filters(data[i][j*lenght:(j+1)*lenght],sampling_rate))
-                    # Show every other x-axis value
-                    plt.xticks(np.arange(min(x), max(x) + 1))
-                    plt.ylabel("Y-axis")
-                    plt.xlabel("X-axis")
-                    plt.grid(True)
-                    plt.show()
                     #checking the signal where it was given to the electrode
                     if detected[i][j] == searched_frequency:
-                        result[i].append(True)
+                        pass
                     else:
-                        correct=False
-                        result[i].append(False)
+                        correct=False 
                 else:
                     if detected[i][j] != None:
-                        correct=False
-                        incorrect.append([(j+1), detected[i][j]])
+                        other_signal = True
+                        
+                        incorrect[i].append([(j+1), detected[i][j]])
                     #checking whether or not there are any extra signals
-                
+            #evaluation
+            if correct:
+                if other_signal:
+                    result[i].append(f"The {electrodes[i]} picked up the sine correctly, but other signals were detected; {incorrect[i]}.")
+                else:
+                    result[i].append(f"The {electrodes[i]} is working correctly, and no other signals were detected.")
+                    
+            else:
+                if other_signal:
+                    result[i].append(f"The {electrodes[i]} did not pick up the sine, and there were also other signals detected; {incorrect[i]}.")
+                else:
+                    result[i].append(f"The {electrodes[i]} did not pick up the sine, and there were no other signals detected.")
+                    
+        #plotting
+            
+        fig, axs = plt.subplots(4, 5, figsize=(20, 16))  # Adjust figsize as needed
+
+        # Flatten the array of axes for easier indexing
+        axs = axs.flatten()
+
+        # Plot only when condition is met
+        plot_index = 0  # Index to keep track of which subplot to use
+        for i in range(len(column_names)):
+            for j in range(number_of_cycles-1):  # Adjusted for fixed number of plots
+                if j % len(column_names) == i:
+                    x = np.linspace(0, 100, lenght)  # Create x-axis values
+                    segment = apply_filters(data[i][j*lenght:(j+1)*lenght], sampling_rate)
+                    axs[plot_index].plot(x, segment)
+                    axs[plot_index].set_ylabel("Y-axis")
+                    axs[plot_index].set_xlabel("X-axis")
+                    axs[plot_index].grid(True)
+                    axs[plot_index].set_xticks(np.arange(min(x), max(x) + 1, step=10))  # Adjust step as needed
+                    plot_index += 1
+
+        # Turn off any unused subplots
+        for k in range(plot_index, len(axs)):
+            axs[k].axis('off')
+
+        # Adjust layout to prevent overlapping
+        plt.tight_layout()
+        plt.show()
+            
+    
             
                 
         """old implementation
@@ -364,8 +415,7 @@ class MyFirstPlugin(ReportPlugin):
                         result[i].append(f'The searched frequency was not found for channel: {i+1}, it was {detected[i][0]}')
             
         """
-        #here comes the algorithm that decides whether the signal that was picked up is correct or not
-        #also, there should be error messages for different kinds of errors
+
 
 
         pdf_file_name= file_name.split("\\")[-1]
