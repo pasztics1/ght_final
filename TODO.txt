@@ -1,0 +1,10 @@
+Correct main.py 
+Order: 'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz', 'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'
+Simán végig lehet iterálni rajtuk, mert úgy jönnek a jelek, amilyen sorrendben vannak beolvasva a csatornák (raw fileban az elso, time sorra kell figyelni)
+
+kiertekeles:
+dominans frekvencia
+szegmentálás - módusz (10 masodperc, elso utolso masodperc levagva a rele zaja miatt)
+
+
+T5 T6on ottmarad
